@@ -8,17 +8,38 @@
 import SwiftUI
 
 struct ContentView: View {
+    @AppStorage("appOpenCounter") private var appOpenCounter: Int = 0
+    @EnvironmentObject private var authViewModel: AuthViewModel
+    @State private var tabSelection: Int = 2
+    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        NavigationView {
+            TabView(selection: $tabSelection) {
+                Tab("Account", systemImage: "person.crop.circle.fill", value: 1) {
+                    AccountView()
+                }
+                
+                Tab("Home", systemImage: "house", value: 2) {
+                    HomeView()
+                }
+                
+                Tab("Start a Game", systemImage: "gamecontroller", value: 3) {
+                    StartAGameView()
+                }
+            }
         }
-        .padding()
+        .onAppear {
+            withAnimation {
+                appOpenCounter += 1
+            }
+            authViewModel.loadExistingAccount()
+        }
     }
 }
 
-#Preview {
-    ContentView()
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .environmentObject(AuthViewModel())
+    }
 }

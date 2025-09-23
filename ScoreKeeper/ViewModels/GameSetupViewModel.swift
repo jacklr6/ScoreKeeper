@@ -9,6 +9,7 @@ import Foundation
 import SwiftUI
 import GameKit
 import Combine
+import CloudKit
 
 @MainActor
 class GameSetupViewModel: ObservableObject {
@@ -17,6 +18,8 @@ class GameSetupViewModel: ObservableObject {
         let displayName: String
     }
     
+    private let database = CKContainer.default().privateCloudDatabase
+    
     @Published var id = UUID()
     @Published var name: String = ""
     @Published var type: String = "Card Game"
@@ -24,6 +27,11 @@ class GameSetupViewModel: ObservableObject {
     @Published var players: [String] = []
     @Published var includesPoints: Bool = false
     @Published var gameCenterFriends: [GameCenterFriend] = []
+    @Published var errorMessage: String?
+    
+    @Published var gameCategory: String = StartAGameView.gameTypeEnum.cardGames.rawValue
+    @Published var cardGameType: String? = nil
+    @Published var boardGameType: String? = nil
     
     func reset() {
         id = UUID()
@@ -44,6 +52,41 @@ class GameSetupViewModel: ObservableObject {
     }
     
     func saveToCloudKit() async throws {
-        print("Saving game: \(name) with \(players.count) players and \(gameCenterFriends.count) friends")
+        let recordID = CKRecord.ID(recordName: id.uuidString)
+        let record = CKRecord(recordType: "Game", recordID: recordID)
+        
+        record["name"] = name as CKRecordValue
+        record["playerCount"] = playerCount as CKRecordValue
+        record["includesPoints"] = includesPoints as CKRecordValue
+        record["gameCategory"] = gameCategory as CKRecordValue
+
+        if let cardType = cardGameType {
+            record["cardGameType"] = cardType as CKRecordValue
+        }
+        if let boardType = boardGameType {
+            record["boardGameType"] = boardType as CKRecordValue
+        }
+        
+        if !players.isEmpty {
+            record["players"] = players as CKRecordValue
+        }
+        
+        let friendIDs = gameCenterFriends.map { $0.id }
+        if !friendIDs.isEmpty {
+            record["friendIDs"] = friendIDs as CKRecordValue
+        }
+        
+        let friendNames = gameCenterFriends.map { $0.displayName }
+        if !friendNames.isEmpty {
+            record["friendNames"] = friendNames as CKRecordValue
+        }
+        
+        do {
+            try await database.save(record)
+            print("✅ Game saved successfully to CloudKit")
+        } catch {
+            print("❌ Error saving game to CloudKit: \(error)")
+            throw error
+        }
     }
 }

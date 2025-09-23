@@ -6,12 +6,18 @@
 //
 
 import SwiftUI
+import GameKit
 
 @main
-struct ScoreKeeperApp: App {
+struct MyApp: App {
+    @StateObject private var authViewModel = AuthViewModel()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(authViewModel)
         }
     }
+
 }
+

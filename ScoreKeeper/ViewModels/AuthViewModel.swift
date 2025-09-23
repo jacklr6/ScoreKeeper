@@ -10,6 +10,8 @@ import AuthenticationServices
 import CloudKit
 import Combine
 import SwiftUI
+import GameKit
+import UIKit
 
 @MainActor
 class AuthViewModel: NSObject, ObservableObject {
@@ -19,6 +21,8 @@ class AuthViewModel: NSObject, ObservableObject {
     @Published var isSignedIn: Bool = false
     @Published var needsProfileCompletion: Bool = false
     @Published var errorMessage: String?
+    @Published var gameCenterAlias: String?
+    @Published var gameCenterDisplayName: String?
 
     private let container = CKContainer.default()
     private let defaultsKey = "appleUserID"
@@ -76,6 +80,7 @@ class AuthViewModel: NSObject, ObservableObject {
         withAnimation {
             self.isSignedIn = true
         }
+        authenticateGameCenter()
     }
 
     func loadExistingAccount() {
@@ -96,6 +101,7 @@ class AuthViewModel: NSObject, ObservableObject {
                 case .authorized:
                     self.userIdentifier = savedID
                     self.fetchUserProfile()
+                    self.authenticateGameCenter()
                     withAnimation {
                         self.isSignedIn = true
                     }
@@ -146,9 +152,9 @@ class AuthViewModel: NSObject, ObservableObject {
                         self.email = record["email"] as? String
                         print("[AuthVM] Loaded from CloudKit: \(self.fullName ?? "-"), \(self.email ?? "-")")
                         self.needsProfileCompletion = (self.fullName == nil && self.email == nil)
+                        self.errorMessage = nil
                     }
                 } else {
-                    // No record returned (safe-guard)
                     self.needsProfileCompletion = true
                     print("[AuthVM] No record returned (nil).")
                 }
@@ -158,11 +164,16 @@ class AuthViewModel: NSObject, ObservableObject {
 
     func saveUserProfile(completion: ((Result<Void, Error>) -> Void)? = nil) {
         guard let userID = userIdentifier else {
-            completion?(.failure(NSError(domain: "Auth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing userIdentifier"])))
+            completion?(.failure(NSError(
+                domain: "Auth",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Missing userIdentifier"]
+            )))
             return
         }
 
         let recordID = CKRecord.ID(recordName: userID)
+
         container.privateCloudDatabase.fetch(withRecordID: recordID) { [weak self] existing, fetchError in
             Task { @MainActor in
                 guard let self = self else { return }
@@ -173,18 +184,24 @@ class AuthViewModel: NSObject, ObservableObject {
                 } else {
                     record = CKRecord(recordType: "UserProfile", recordID: recordID)
                 }
-                
-                withAnimation {
-                    if let name = self.fullName { record["fullName"] = name as CKRecordValue }
-                    if let mail = self.email { record["email"] = mail as CKRecordValue }
+
+                // Update fields
+                if let name = self.fullName {
+                    record["fullName"] = name as CKRecordValue
+                }
+                if let mail = self.email {
+                    record["email"] = mail as CKRecordValue
                 }
 
-                self.container.privateCloudDatabase.save(record) { saved, saveError in
+                // Save via modify operation
+                let operation = CKModifyRecordsOperation(recordsToSave: [record])
+                operation.savePolicy = .changedKeys
+                operation.modifyRecordsCompletionBlock = { saved, deleted, error in
                     Task { @MainActor in
-                        if let saveError = saveError {
-                            self.errorMessage = "Save failed: \(saveError.localizedDescription)"
-                            print("[AuthVM] Save failed: \(saveError)")
-                            completion?(.failure(saveError))
+                        if let error = error {
+                            print("[AuthVM] Save failed: \(error)")
+                            self.errorMessage = "Save failed: \(error.localizedDescription)"
+                            completion?(.failure(error))
                         } else {
                             print("[AuthVM] Profile saved/updated in CloudKit")
                             self.needsProfileCompletion = false
@@ -192,6 +209,8 @@ class AuthViewModel: NSObject, ObservableObject {
                         }
                     }
                 }
+
+                self.container.privateCloudDatabase.add(operation)
             }
         }
     }
@@ -218,5 +237,34 @@ class AuthViewModel: NSObject, ObservableObject {
                 Task { @MainActor in self.errorMessage = "Save failed: \(error.localizedDescription)" }
             }
         }
+    }
+    
+    func authenticateGameCenter() {
+        let localPlayer = GKLocalPlayer.local
+
+        localPlayer.authenticateHandler = { vc, error in
+            if let vc = vc {
+                if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let root = scene.windows.first?.rootViewController {
+                    root.present(vc, animated: true)
+                }
+            } else if localPlayer.isAuthenticated {
+                print("✅ Game Center signed in as \(localPlayer.displayName)")
+                self.handleGameCenterAuth(localPlayer)
+            } else {
+                if let error = error {
+                    print("❌ Game Center error: \(error.localizedDescription)")
+                } else {
+                    print("❌ Game Center not authenticated")
+                }
+            }
+        }
+    }
+
+    private func handleGameCenterAuth(_ player: GKLocalPlayer) {
+        self.gameCenterAlias = player.alias
+        self.gameCenterDisplayName = player.displayName
+        self.fullName = player.displayName
+        saveUserProfile()
     }
 }
