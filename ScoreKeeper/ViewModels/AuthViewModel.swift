@@ -26,6 +26,8 @@ class AuthViewModel: NSObject, ObservableObject {
 
     private let container = CKContainer.default()
     private let defaultsKey = "appleUserID"
+    
+    private let localPlayer = GKLocalPlayer.local
 
     override init() {
         super.init()
@@ -71,16 +73,24 @@ class AuthViewModel: NSObject, ObservableObject {
         }
 
         if gotNewInfo {
-            saveUserProfile()
-            self.needsProfileCompletion = false
+            saveUserProfile { [weak self] _ in
+                guard let self = self else { return }
+                self.needsProfileCompletion = false
+                withAnimation {
+                    self.isSignedIn = true
+                }
+            }
         } else {
-            fetchUserProfile()
+            fetchUserProfile { [weak self] in
+                guard let self = self else { return }
+                withAnimation {
+                    self.isSignedIn = true
+                }
+            }
         }
-        
-        withAnimation {
-            self.isSignedIn = true
-        }
+
         authenticateGameCenter()
+        handleGameCenterAuth(localPlayer)
     }
 
     func loadExistingAccount() {
@@ -115,9 +125,10 @@ class AuthViewModel: NSObject, ObservableObject {
         }
     }
 
-    func fetchUserProfile() {
+    func fetchUserProfile(completion: (() -> Void)? = nil) {
         guard let userID = userIdentifier else {
             print("[AuthVM] fetchUserProfile: no userIdentifier")
+            completion?()
             return
         }
 
@@ -132,10 +143,12 @@ class AuthViewModel: NSObject, ObservableObject {
                     if ckErr.code == .unknownItem {
                         print("[AuthVM] No UserProfile record in CloudKit (unknownItem)")
                         self.needsProfileCompletion = true
+                        completion?()
                         return
                     } else {
                         self.errorMessage = "CloudKit fetch error: \(ckErr.localizedDescription)"
                         print("[AuthVM] CloudKit fetch error: \(ckErr)")
+                        completion?()
                         return
                     }
                 }
@@ -143,6 +156,7 @@ class AuthViewModel: NSObject, ObservableObject {
                 if let err = error {
                     self.errorMessage = "Fetch error: \(err.localizedDescription)"
                     print("[AuthVM] Fetch error: \(err)")
+                    completion?()
                     return
                 }
 
@@ -158,6 +172,7 @@ class AuthViewModel: NSObject, ObservableObject {
                     self.needsProfileCompletion = true
                     print("[AuthVM] No record returned (nil).")
                 }
+                completion?()
             }
         }
     }
@@ -184,16 +199,14 @@ class AuthViewModel: NSObject, ObservableObject {
                 } else {
                     record = CKRecord(recordType: "UserProfile", recordID: recordID)
                 }
-
-                // Update fields
+                
                 if let name = self.fullName {
                     record["fullName"] = name as CKRecordValue
                 }
                 if let mail = self.email {
                     record["email"] = mail as CKRecordValue
                 }
-
-                // Save via modify operation
+                
                 let operation = CKModifyRecordsOperation(recordsToSave: [record])
                 operation.savePolicy = .changedKeys
                 operation.modifyRecordsCompletionBlock = { saved, deleted, error in
@@ -264,7 +277,9 @@ class AuthViewModel: NSObject, ObservableObject {
     private func handleGameCenterAuth(_ player: GKLocalPlayer) {
         self.gameCenterAlias = player.alias
         self.gameCenterDisplayName = player.displayName
-        self.fullName = player.displayName
+        
+        self.fullName = player.alias
         saveUserProfile()
+        print("saved displayName to profile. \(gameCenterAlias), \(gameCenterDisplayName)")
     }
 }
