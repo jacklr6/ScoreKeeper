@@ -161,6 +161,7 @@ struct StartAGameView: View {
                 Text("Think of a good name for you to identify this game if you want to play it again.")
             })
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }
 
@@ -211,51 +212,55 @@ struct SelectGameCenterFriendsView: View {
     @State private var isLoading = false
 
     var body: some View {
-        VStack {
-            if isLoading {
-                ProgressView()
-            } else {
-                if allFriends.isEmpty {
-                    if #available(iOS 26.0, *) {
-                        Image(systemName: switchFriendIcon ? "person" : "person.3")
-                            .font(.system(size: 100))
-                            .symbolEffect(.drawOn.individually, isActive: noFriendsAnimation)
-                            .padding(.bottom, -10)
-                            .contentTransition(.symbolEffect(.automatic))
-                            .frame(height: 100)
-                    } else {
-                        Image(systemName: "person.3")
-                            .font(.system(size: 100))
-                            .symbolEffect(.bounce, isActive: noFriendsAnimation)
-                            .padding(.bottom, -10)
-                    }
-                    
-                    Text("No Friends Found!")
-                        .font(.title)
-                        .fontWeight(.semibold)
-                    Text("Invite your friends to ScoreKeeper to play with them, otherwise you can add their name manually without GameCenter!")
-                        .padding(.horizontal, 20)
-                        .multilineTextAlignment(.center)
+        NavigationStack {
+            VStack {
+                if isLoading {
+                    ProgressView()
                 } else {
-                    List(allFriends, id: \.gamePlayerID) { friend in
-                        Button {
-                            viewModel.addFriend(friend)
-                        } label: {
-                            Text(friend.displayName)
+                    if allFriends.isEmpty {
+                        if #available(iOS 26.0, *) {
+                            Image(systemName: switchFriendIcon ? "person" : "person.3")
+                                .font(.system(size: 100))
+                                .symbolEffect(.drawOn.individually, isActive: noFriendsAnimation)
+                                .padding(.bottom, -10)
+                                .contentTransition(.symbolEffect(.automatic))
+                                .frame(height: 100)
+                        } else {
+                            Image(systemName: "person.3")
+                                .font(.system(size: 100))
+                                .symbolEffect(.bounce, isActive: noFriendsAnimation)
+                                .padding(.bottom, -10)
                         }
-                        Text("Hello, World!")
+                        
+                        Text("No Friends Found!")
+                            .font(.title)
+                            .fontWeight(.semibold)
+                        Text("Invite your friends to ScoreKeeper to play with them, otherwise you can add their name manually without GameCenter!")
+                            .padding(.horizontal, 20)
+                            .multilineTextAlignment(.center)
+                    } else {
+                        List(allFriends, id: \.gamePlayerID) { (friend: GKPlayer) in
+                            Button {
+                                viewModel.toggleFriend(friend)
+                            } label: {
+                                HStack {
+                                    Text(friend.displayName)
+                                    Spacer()
+                                    if viewModel.gameCenterFriends.contains(where: { $0.id == friend.gamePlayerID }) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
+            .navigationTitle("Game Center Friends")
         }
         .onAppear {
             Task {
-                do {
-                    allFriends = try await GKLocalPlayer.local.loadFriends()
-                    print("Friends Fetched: \(allFriends.count)")
-                } catch {
-                    print("Failed to Load Friends: \(error)")
-                }
+                await loadFriends()
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 noFriendsAnimation = false
@@ -293,25 +298,36 @@ struct SelectGameCenterFriendsView: View {
         }
     }
     
-    func fetchFriends() {
-        withAnimation {
-            isLoading = true
+    private func loadFriends() async {
+        do {
+            let friends = try await GKLocalPlayer.local.loadFriends()
+            // Cast each friend to GKPlayer explicitly
+            let players = friends.compactMap { $0 as? GKPlayer }
             
-            Task {
-                let start = Date()
-                do {
-                    let friends = try await GKLocalPlayer.local.loadFriends()
-                    allFriends = friends
-                    print("Friends Fetched: \(friends.count)")
-                } catch {
-                    print("Failed to Load Friends: \(error)")
-                }
-                
-                let elapsed = Date().timeIntervalSince(start)
-                if elapsed < 0.5 {
-                    try? await Task.sleep(nanoseconds: UInt64((0.5 - elapsed) * 1_000_000_000))
-                }
-                
+            await MainActor.run {
+                allFriends = players
+                print("Friends Fetched: \(allFriends.count)")
+            }
+        } catch {
+            print("Failed to Load Friends: \(error)")
+        }
+    }
+    
+    func fetchFriends() {
+        Task {
+            await MainActor.run {
+                isLoading = true
+            }
+            
+            let start = Date()
+            await loadFriends()
+            
+            let elapsed = Date().timeIntervalSince(start)
+            if elapsed < 0.5 {
+                try? await Task.sleep(nanoseconds: UInt64((0.5 - elapsed) * 1_000_000_000))
+            }
+            
+            await MainActor.run {
                 isLoading = false
             }
         }
@@ -324,16 +340,16 @@ struct AddPointValuesView: View {
     }
 }
 
-//struct StartAGameView_Previews: PreviewProvider {
-//    static var previews: some View {
-//        ContentView()
-//            .environmentObject(AuthViewModel())
-//    }
-//}
-
-struct SelectFriendView_Previews: PreviewProvider {
+struct StartAGameView_Previews: PreviewProvider {
     static var previews: some View {
-        SelectGameCenterFriendsView(viewModel: GameSetupViewModel())
+        ContentView()
             .environmentObject(AuthViewModel())
     }
 }
+
+//struct SelectFriendView_Previews: PreviewProvider {
+//    static var previews: some View {
+//        SelectGameCenterFriendsView(viewModel: GameSetupViewModel())
+//            .environmentObject(AuthViewModel())
+//    }
+//}

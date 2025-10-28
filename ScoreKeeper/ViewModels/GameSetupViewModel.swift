@@ -51,6 +51,15 @@ class GameSetupViewModel: ObservableObject {
         }
     }
     
+    func toggleFriend(_ player: GKPlayer) {
+        let friend = GameCenterFriend(id: player.gamePlayerID, displayName: player.displayName)
+        if let idx = gameCenterFriends.firstIndex(where: { $0.id == friend.id }) {
+            gameCenterFriends.remove(at: idx)
+        } else {
+            gameCenterFriends.append(friend)
+        }
+    }
+    
     func saveToCloudKit() async throws {
         let recordID = CKRecord.ID(recordName: id.uuidString)
         let record = CKRecord(recordType: "Game", recordID: recordID)

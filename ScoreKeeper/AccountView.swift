@@ -119,6 +119,7 @@ struct AccountView: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }
 

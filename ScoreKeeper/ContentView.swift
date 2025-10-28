@@ -28,6 +28,7 @@ struct ContentView: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .onAppear {
             withAnimation {
                 appOpenCounter += 1
